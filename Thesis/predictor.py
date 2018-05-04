@@ -2,6 +2,7 @@ import numpy as np
 import tensorflow as tf
 from Model_v2 import Resnet_v2
 import dataset
+import sklearn as sk
 
 tf.app.flags.DEFINE_integer('training_iteration', 40000, 'number of training iterations.')
 tf.app.flags.DEFINE_string('work_dir', '/tmp', 'Working directory.')
@@ -60,9 +61,10 @@ prediction_classes = table.lookup(tf.to_int64(indices))
 correct_prediction = tf.equal(tf.argmax(params['softmax'], 1), tf.argmax(params['labels'], 1))
 accuracy = tf.reduce_mean(tf.cast(correct_prediction, 'float'))
 
-ensemble = [0]*(dataset.real.gram.shape[0])
+ensemble = np.zeros(shape=(5, 2))
 saver = tf.train.Saver()
-for k in range(1):
+n_models = 3
+for k in range(n_models):
     model_path = FLAGS.checkpoint_dir + str(k + 1)
 
     with tf.Session() as sess:
@@ -70,11 +72,20 @@ for k in range(1):
         pred = sess.run(
                 params['softmax'], feed_dict={
                     params['in']: dataset.real.gram,
-                    params['labels']: dataset.real.gram,
+                    params['labels']: dataset.real.labels,
                     params['weight_decay']: 0.005,
                     params['training']: False
                 })
+        print(pred)
         ensemble += pred
         sess.close()
 
-print(ensemble)
+ensemble = ensemble / n_models
+ensemble = np.argmax(ensemble, 1)
+labels = np.argmax(dataset.real.labels, 1)
+
+print("confusion matrix")
+print(sk.metrics.confusion_matrix(labels, ensemble))
+
+print("F1 score")
+print(sk.metrics.f1_score(labels, ensemble))

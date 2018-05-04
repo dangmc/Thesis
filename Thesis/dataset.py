@@ -16,22 +16,29 @@ class   Dataset:
         self.index_in_epochs = 0
         self.epochs_completed = 0
         self.num_instances = _gram.shape[0]
-        self.new_epoch = True
+        self.new_epoch = False
 
     def next_batch(self, batch_sz):
         start = self.index_in_epochs
         if self.index_in_epochs != 0:
             self.new_epoch = False
+
         self.index_in_epochs += batch_sz
-        if self.index_in_epochs > self.num_instances:
-            self.new_epoch = True
+
+        if self.index_in_epochs > self.num_instances and start < self.num_instances:
+            self.index_in_epochs = self.num_instances
             self.epochs_completed += 1
+            self.new_epoch = True
+
+        if start == self.num_instances:
             perm = np.arange(self.num_instances)
             np.random.shuffle(perm)
             self.gram = self.gram[perm]
             self.labels = self.labels[perm]
             start = 0
             self.index_in_epochs = batch_sz
+
+
         end = self.index_in_epochs
 
         return self.gram[start: end], self.labels[start: end]
@@ -97,7 +104,8 @@ def read_data(path, is_malware = False):
     labels_ = np.array([0]*data_.shape[0]) if is_malware else np.array([1]*data_.shape[0])
     return (data_, labels_)
 
-def load_data(path_malware, path_benign, one_hot_encode=False, sz = 64, num_labels=2):
+
+def load_real_data(path_malware, path_benign, one_hot_encode=False, sz=64, num_labels=2):
     class Datasets:
         pass
     datasets = Datasets()
@@ -111,6 +119,27 @@ def load_data(path_malware, path_benign, one_hot_encode=False, sz = 64, num_labe
         labels = one_hot(labels, num_labels)
     data = np.reshape(data, (-1, sz, sz, 1))
 
+    datasets.real = Dataset(data, labels)
+
+    return datasets
+
+def load_data(path_malware, path_benign, path_real, one_hot_encode=False, sz = 64, num_labels=2):
+    class Datasets:
+        pass
+    datasets = Datasets()
+
+    data_malware, labels_malware = read_data(path_malware, is_malware=True)
+    data_benign, labels_benign = read_data(path_benign)
+    data_real, labels_real = read_data(path_real, is_malware=True)
+
+    data = np.concatenate((data_malware, data_benign), axis=0)
+    labels = np.concatenate((labels_malware, labels_benign), axis=0)
+    if one_hot_encode:
+        labels = one_hot(labels, num_labels)
+        labels_real = one_hot(labels_real, num_labels)
+    data = np.reshape(data, (-1, sz, sz, 1))
+    data_real = np.reshape(data_real, (-1, sz, sz, 1))
+
     shuffle = np.random.permutation(data.shape[0])
     data = data[shuffle]
     labels = labels[shuffle]
@@ -119,6 +148,7 @@ def load_data(path_malware, path_benign, one_hot_encode=False, sz = 64, num_labe
 
     datasets.train = Dataset(X_train, y_train)
     datasets.test = Dataset(X_test, y_test)
+    datasets.real = Dataset(data_real, labels_real)
 
     return datasets
 

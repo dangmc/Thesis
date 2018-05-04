@@ -63,7 +63,7 @@ class Resnet_v2:
 
         return inputs
 
-    def arcface_loss(self, embedding, labels, out_num, w_init=None, s=64., m=0.5):
+    def arcface_loss(self, embedding, labels, out_num, w_init=None, s=64., m=0.1):
         '''
         :param embedding: the input embedding vectors
         :param labels:  the input labels, the shape should be eg: (batch_size, 1)
@@ -108,16 +108,29 @@ class Resnet_v2:
             s_cos_t = tf.multiply(s, cos_t, name='scalar_cos_t')
 
             output = tf.add(tf.multiply(s_cos_t, inv_mask), tf.multiply(cos_mt_temp, mask), name='arcface_loss_output')
-        return output
+        return output, cos_t
 
     def build_model(self, filters_init, strides_layers, kernel_size, strides, pool_size):
         # TO DO
-
-        serialized_tf_example = tf.placeholder(tf.string, name='image')
-        feature_configs = {'x': tf.FixedLenFeature(shape=self.input_sz, dtype=tf.float32), }
-        tf_example = tf.parse_example(serialized_tf_example, feature_configs)
-        inputs = tf.identity(tf_example['x'], name='x')
+        # image
+        serialized_tf_image = tf.placeholder(tf.string, name='image')
+        feature_image = {'x': tf.FixedLenFeature(shape=self.input_sz, dtype=tf.float32), }
+        tf_image = tf.parse_example(serialized_tf_image, feature_image)
+        inputs = tf.identity(tf_image['x'], name='x')
         copy = inputs
+
+        # # one gram feature
+        # serialized_tf_gram = tf.placeholder(tf.string, name='one_gram')
+        # feature_gram = {'y': tf.FixedLenFeature(shape=[255], dtype=tf.float32), }
+        # tf_gram = tf.parse_example(serialized_tf_gram, feature_gram)
+        # one_gram = tf.identity(tf_gram['y'], name='y')
+        #
+        # # dll feature
+        # serialized_tf_dll = tf.placeholder(tf.string, name='dll')
+        # feature_dll = {'z': tf.FixedLenFeature(shape=[794], dtype=tf.float32), }
+        # tf_dll = tf.parse_example(serialized_tf_dll, feature_gram)
+        # dll = tf.identity(tf_dll['z'], name='z')
+
 
         y_ = tf.placeholder('float', shape=[None, self.num_classes])
 
@@ -148,26 +161,29 @@ class Resnet_v2:
 
 
         # dense layer
+        # inputs = tf.concat([inputs, one_gram, dll], 1)
         # outputs = tf.layers.dense(inputs=inputs, units=self.num_classes)
+        # logits = outputs
+
 
 
         # arcface loss
         w_init_method = tf.contrib.layers.xavier_initializer(uniform=False)
-        outputs = self.arcface_loss(embedding=inputs, labels=y_, w_init=w_init_method, out_num=self.num_classes)
+        outputs, logits = self.arcface_loss(embedding=inputs, labels=y_, w_init=w_init_method, out_num=self.num_classes)
 
-        softmax = tf.nn.softmax(outputs)
+        softmax = tf.nn.softmax(logits)
         tf.identity(softmax, "softmax_value")
 
 
 
 
-        l2_loss = weight_decay * tf.add_n(
+        l2_loss = tf.add_n(
             [tf.nn.l2_loss(v) for v in tf.trainable_variables()])
 
 
 
         params = {}
-        params['in_name'] = serialized_tf_example
+        params['in_name'] = serialized_tf_image
         params['in'] = copy
         params['logits'] = outputs
         params['labels'] = y_
