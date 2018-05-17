@@ -55,6 +55,59 @@ class   Dataset:
     def get_epochs_completed(self):
         return self.epochs_completed
 
+class   Dataset_2d:
+
+    def __init__(self, _img, _his, _labels):
+        self.img = _img
+        self.his = _his
+        self.labels = _labels
+        self.index_in_epochs = 0
+        self.epochs_completed = 0
+        self.num_instances = _img.shape[0]
+        self.new_epoch = False
+
+    def next_batch(self, batch_sz):
+        start = self.index_in_epochs
+        if self.index_in_epochs != 0:
+            self.new_epoch = False
+
+        self.index_in_epochs += batch_sz
+
+        if self.index_in_epochs > self.num_instances and start < self.num_instances:
+            self.index_in_epochs = self.num_instances
+            self.epochs_completed += 1
+            self.new_epoch = True
+
+        if start == self.num_instances:
+            perm = np.arange(self.num_instances)
+            np.random.shuffle(perm)
+            self.img = self.img[perm]
+            self.his = self.his[perm]
+            self.labels = self.labels[perm]
+            start = 0
+            self.index_in_epochs = batch_sz
+
+
+        end = self.index_in_epochs
+
+        return self.img[start: end], self.his[start: end], self.labels[start: end]
+
+    def is_new_epoch(self):
+        return self.new_epoch
+
+    def get_img(self):
+        return self.img
+
+    def get_his(self):
+        return self.his
+
+    def get_labels(self):
+        return self.labels
+
+    def get_epochs_completed(self):
+        return self.epochs_completed
+
+
 def extract_binary_gram(path):
     # TODO
     with open(path, 'r') as f:
@@ -93,7 +146,11 @@ def mnist(path, one_hot_encode=False, num_labels = 10):
 
 def read_data(path, is_malware = False):
     data_ = []
+    cnt = 0
     for f in listdir(path):
+        cnt += 1
+        if (cnt > 3000):
+            break
         file = join(path, f)
         if isfile(file):
             with open(file, 'r') as js:
@@ -153,6 +210,66 @@ def load_data(path_malware, path_benign, path_real, one_hot_encode=False, sz = 6
     return datasets
 
 
+def load_test_data_histogram(path_malware=None, path_benign=None, one_hot_encode=False, sz = 256, num_labels = 2):
+    class Datasets:
+        pass
+    datasets = Datasets()
+    data_malware, labels_malware = read_histogram_data(path_malware, is_malware=True)
+    data_benign, labels_benign = read_histogram_data(path_benign)
+
+    data = np.concatenate((data_malware, data_benign), axis=0)
+    labels = np.concatenate((labels_malware, labels_benign), axis=0)
+    # data = data_malware
+    # labels = labels_malware
+    if one_hot_encode:
+        labels = one_hot(labels, num_labels)
+    data = np.reshape(data, (-1, sz))
+
+    datasets.real = Dataset(data, labels)
+    return datasets
+
+
+def read_histogram_data(path, is_malware=False):
+    data_ = []
+    cnt = 0
+    for f in listdir(path):
+        cnt += 1
+        file = join(path, f)
+        if isfile(file):
+            with open(file, 'r') as js:
+                data = [json.loads(line) for line in js]
+                s = sum(data[0]["feature"])
+                feature = [float(x) / s for x in data[0]["feature"]]
+                data_.append(feature)
+                js.close()
+    data_ = np.array(data_)
+    labels_ = np.array([0] * data_.shape[0]) if is_malware else np.array([1] * data_.shape[0])
+    return (data_, labels_)
+
+
+def load_histogram_data(path_malware, path_benign, one_hot_encode=False, sz=256, num_labels=2):
+    class Datasets:
+        pass
+    datasets = Datasets()
+
+    data_malware, labels_malware = read_histogram_data(path_malware, is_malware=True)
+    data_benign, labels_benign = read_histogram_data(path_benign)
+
+    data = np.concatenate((data_malware, data_benign), axis=0)
+    labels = np.concatenate((labels_malware, labels_benign), axis=0)
+    if one_hot_encode:
+        labels = one_hot(labels, num_labels)
+    data = np.reshape(data, (-1, 256))
+    shuffle = np.random.permutation(data.shape[0])
+    data = data[shuffle]
+    labels = labels[shuffle]
+
+    X_train, X_test, y_train, y_test = train_test_split(data, labels, test_size=0.15)
+
+    datasets.train = Dataset(X_train, y_train)
+    datasets.test = Dataset(X_test, y_test)
+    return datasets
+
 def read_malware_dataset(path, one_hot_encode=False, num_labels=10):
 
     class Datasets:
@@ -182,3 +299,69 @@ def read_malware_dataset(path, one_hot_encode=False, num_labels=10):
 # labels = datasets.train.get_labels()
 #
 # print(labels)
+
+
+def read_histogram_feature(file):
+    with open(file, 'r') as js:
+        data = [json.loads(line) for line in js]
+        s = sum(data[0]["feature"])
+        feature = [float(x) / s for x in data[0]["feature"]]
+        js.close()
+    return feature
+
+def read_image_feature(file):
+    with open(file, 'r') as js:
+        data = [json.loads(line) for line in js]
+        feature = data[0]["pixels"]
+        js.close()
+    return feature
+
+def read_histogram_image(path_img, path_his, is_malware=False):
+    data_img = []
+    data_his = []
+    for f in listdir(path_his):
+        if isfile(path_img + f) == False:
+            continue
+        file_his = join(path_his, f)
+        file_img = join(path_img, f)
+        fea_his = read_histogram_feature(file_his)
+        fea_img = read_image_feature(file_img)
+        data_his.append(fea_his)
+        data_img.append(fea_img)
+    data_his = np.array(data_his)
+    data_img = np.array(data_img)
+    labels_ = np.array([0] * data_his.shape[0]) if is_malware else np.array([1] * data_his.shape[0])
+    return (data_his, data_img, labels_)
+
+def load_histogram_image(path_malware_img, path_malware_his, path_benign_img, path_benign_his, one_hot_encode=False, sz_img=64, sz_his=256, num_labels=2, split_rate = 85):
+    class Datasets:
+        pass
+    datasets = Datasets()
+    data_malware_his, data_malware_img, labels_malware = read_histogram_image(path_img=path_malware_img, path_his=path_malware_his, is_malware=True)
+    data_benign_his, data_benign_img, labels_benign = read_histogram_image(path_img=path_benign_img, path_his=path_benign_his)
+
+    data_his = np.concatenate((data_malware_his, data_benign_his), axis=0)
+    data_img = np.concatenate((data_malware_img, data_benign_img), axis=0)
+    labels = np.concatenate((labels_malware, labels_benign), axis=0)
+
+    if one_hot_encode:
+        labels = one_hot(labels, num_labels)
+    data_his = np.reshape(data_his, (-1, sz_his))
+    data_img = np.reshape(data_img, (-1, sz_img, sz_img, 1))
+
+    total_ins = data_img.shape[0]
+    train_ins = int(total_ins * split_rate / 100)
+
+    X_train_his = data_his[:train_ins]
+    X_train_img = data_img[:train_ins]
+
+    X_test_his = data_his[train_ins:]
+    X_test_img = data_img[train_ins:]
+
+    y_train = labels[:train_ins]
+    y_test = labels[train_ins:]
+
+    datasets.train = Dataset_2d(X_train_img, X_train_his, y_train)
+    datasets.test = Dataset_2d(X_test_img, X_test_his, y_test)
+
+    return datasets

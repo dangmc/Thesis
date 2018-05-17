@@ -1,13 +1,15 @@
 import numpy as np
 import tensorflow as tf
-from Model_v2 import Resnet_v2
+from Model_v3 import Resnet_v2
 import dataset
 import sklearn as sk
 
 tf.app.flags.DEFINE_integer('training_iteration', 40000, 'number of training iterations.')
 tf.app.flags.DEFINE_string('work_dir', '/tmp', 'Working directory.')
-tf.app.flags.DEFINE_string('path_malware', '/tmp', 'Working directory of malware.')
-tf.app.flags.DEFINE_string('path_benign', '/tmp', 'Working directory of benign.')
+tf.app.flags.DEFINE_string('path_malware_his', '/tmp', 'Working directory of malware.')
+tf.app.flags.DEFINE_string('path_benign_his', '/tmp', 'Working directory of benign.')
+tf.app.flags.DEFINE_string('path_malware_img', '/tmp', 'Working directory of malware.')
+tf.app.flags.DEFINE_string('path_benign_img', '/tmp', 'Working directory of benign.')
 tf.app.flags.DEFINE_string('path_real', '/tmp', 'Working directory of real data.')
 tf.app.flags.DEFINE_integer('model_version', 1, 'model version.')
 tf.app.flags.DEFINE_float('learning_rate', 0.001, 'learning rate.')
@@ -24,7 +26,9 @@ FLAGS = tf.app.flags.FLAGS
 
 tf.reset_default_graph()
 
-dataset = dataset.load_real_data(FLAGS.path_malware, FLAGS.path_benign, one_hot_encode=True, sz=FLAGS.input_size)
+dataset = dataset.load_histogram_image(path_malware_his=FLAGS.path_malware_his, path_malware_img=FLAGS.path_malware_img,
+                                       path_benign_his=FLAGS.path_benign_his, path_benign_img=FLAGS.path_benign_img,
+                                       one_hot_encode=True)
 
 model = Resnet_v2(3, [2, 2, 2], num_labels, input_size)
 params = model.build_model(filters_init=32, strides_layers=[2, 2, 2], kernel_size=3, pool_size=3, strides=2)
@@ -61,30 +65,49 @@ prediction_classes = table.lookup(tf.to_int64(indices))
 correct_prediction = tf.equal(tf.argmax(params['softmax'], 1), tf.argmax(params['labels'], 1))
 accuracy = tf.reduce_mean(tf.cast(correct_prediction, 'float'))
 
-ensemble = np.zeros(shape=(dataset.real.labels.shape[0], 2))
+ensemble_set1 = np.zeros(shape=(dataset.train.labels.shape[0], 2))
+ensemble_set2 =  np.zeros(shape=(dataset.test.labels.shape[0],2))
 saver = tf.train.Saver()
-n_models = 3
+n_models = 2
 for k in range(n_models):
     model_path = FLAGS.checkpoint_dir + str(k + 1)
     with tf.Session() as sess:
         saver.restore(sess, model_path + '/' + 'model')
-        pred = sess.run(
-                params['softmax'], feed_dict={
-                    params['in']: dataset.real.gram,
-                    params['labels']: dataset.real.labels,
-                    params['weight_decay']: 0.005,
-                    params['training']: False
-                })
-        print(pred)
-        ensemble += pred
+        pred_set1 = sess.run(
+            params['softmax'], feed_dict={
+                params['in']: dataset.train.img,
+                params['labels']: dataset.train.labels,
+                params['weight_decay']: 0.005,
+                params['training']: False,
+                params['in_histogram']: dataset.train.his,
+            })
+
+        pred_set2 = sess.run(
+            params['softmax'], feed_dict={
+                params['in']: dataset.test.img,
+                params['labels']: dataset.test.labels,
+                params['weight_decay']: 0.005,
+                params['training']: False,
+                params['in_histogram']: dataset.test.his,
+            })
+
+        pred = tf.concat([pred_set1, pred_set2], axis=0)
+
+        ensemble_set1 += pred_set1
+        ensemble_set2 += pred_set2
         sess.close()
 
-ensemble = ensemble / n_models
-ensemble = np.argmax(ensemble, 1)
-labels = np.argmax(dataset.real.labels, 1)
+ensemble_set1 = ensemble_set1 / n_models
+ensemble_set2 = ensemble_set2 / n_models
+
+ensemble_set1 = np.argmax(ensemble_set1, 1)
+ensemble_set2 = np.argmax(ensemble_set2, 1)
+
+labels_set1 = np.argmax(dataset.train.labels, 1)
+labels_set2 = np.argmax(dataset.test.labels, 1)
 
 print("confusion matrix")
-print(sk.metrics.confusion_matrix(labels, ensemble))
-
-print("F1 score")
-print(sk.metrics.f1_score(labels, ensemble))
+print(sk.metrics.confusion_matrix(labels_set1, ensemble_set1))
+print(sk.metrics.confusion_matrix(labels_set2, ensemble_set2))
+# print("F1 score")
+# print(sk.metrics.f1_score(labels, ensemble))

@@ -7,10 +7,10 @@ import pefile, zipfile, json, sys, re
 import cv2 as cv
 import matplotlib.cm as cm
 
+from sultan.api import Sultan
 from os import listdir
 from os.path import isfile, join
-import subprocess
-import shlex
+import math
 
 
 class Extractor:
@@ -35,6 +35,33 @@ class Extractor:
             w = 32
 
         return w
+
+    def get_name(src):
+        name = []
+        for f in listdir(src):
+            name.append(f[:f.index('.')] + '.json')
+        return name
+
+    def read_data(self, path, lent):
+        data_ = []
+        width = []
+        height = []
+        name = []
+        for f in listdir(path):
+            file = join(path, f)
+            if isfile(file):
+                with open(file, 'r') as js:
+                    data = [json.loads(line) for line in js]
+                    data_.append(data[0]['pixels'])
+                    width.append(data[0]['width'])
+                    height.append(data[0]['height'])
+                    name.append(data[0]['name'])
+                    js.close()
+        data_ = np.array(data_)
+        width = np.array(width)
+        height = np.array(height)
+        name = np.array(name)
+        return (data_[:lent], width[:lent], height[:lent], name[:lent])
 
     def read_Binary(self, file):
         pixels = []
@@ -108,24 +135,144 @@ class Extractor:
         Y = transfer.fit_transform(X)
         return Y, h, d
 
-    def display(self, pixels, w, h):
+    def display(self, pixels, w, h, n, path):
         g = np.reshape(pixels, (h, w))
-        plt.imshow(g, cmap=cm.gray)
-        plt.show()
+        # plt.imshow(g, cmap=cm.gray)
+        plt.imshow(g)
+        plt.savefig(path + n + '.png')
+        # plt.show()
+
+    def entropy(self, bytes):
+        p = [0.0] * 256
+        for byte in bytes:
+            p[byte] += 1.0
+        for i in range(len(p)):
+            p[i] = p[i] / len(bytes)
+        entropy = 0
+        for i in range(len(p)):
+            if p[i] != 0.0:
+                entropy += p[i] * math.log2(p[i])
+        return -entropy
+
+    def histogram_2d(self, pixels, window):
+        histogram = [[0 for x in range(16)] for y in range(16)]
+        start = 0
+        while (start < len(pixels)):
+            end = min(start + window, len(pixels))
+            bytes = pixels[start: end]
+            ent = self.entropy(bytes)
+            ent = math.trunc(ent * 2)
+            for byte in bytes:
+                x = math.trunc(byte / 16)
+                # print(x)
+                # print(ent)
+                histogram[x][ent] += 1
+            start += window
+        ans = []
+        for i in range(16):
+            for j in range(16):
+                ans.append(histogram[i][j])
+        return ans
+
+    def extract_2d_histogram(self, src, dst, window):
+        cnt = 0
+        for f in listdir(src):
+            file = join(src, f)
+            try:
+                with open(file, 'r') as js:
+                    data = [json.loads(line) for line in js]
+                    pixels = data[0]['pixels']
+                    name = data[0]['name']
+                    ent = self.entropy(pixels)
+                    histogram = self.histogram_2d(pixels, window)
+                    # s = sum(histogram)
+                    # histogram = [x / s for x in histogram]
+                    with open(dst + f, 'w') as j:
+                        data = {'name': name, 'feature': histogram}
+                        json.dump(data, j)
+                        j.close()
+                        cnt += 1
+                        print("file's id: %d, name = %s" % (cnt, name))
+                    js.close()
+            except Exception:
+                print('ERROR: ' + file)
+
+    def build_one_gram_feature(self, src, dst):
+        cnt = 0
+        bytes = [0] * 255
+        for f in listdir(src):
+            file = join(src, f)
+            with open(file, 'r') as js:
+                data = [json.loads(line) for line in js]
+                name = data[0]['name']
+                pixels = data[0]['pixels']
+                for x in pixels:
+                    bytes[x] += 1
+                with open(dst + name + '.json') as j:
+                    cnt += 1
+                    data = {'name': name, 'feature': bytes}
+                    json.dump(data, j)
+                    print("file's id: %d, name = %s" % (cnt, name))
+
+    def extract_dll(self, src, dst):
+        cnt = 0
+        for f in listdir(src):
+                if isfile(dst + f + '.json'):
+                    continue
+                file = join(src, f)
+                dll = self.extract_import_lib(src + f)
+                if len(dll) == 0:
+                    continue
+                cnt += 1
+                with open(dst + f + '.json', 'w') as js:
+                    data = {'name': f, 'feature': dll}
+                    json.dump(data, js)
+                print("file's id : %d, name= %s" % (cnt, f))
 
     def extract_import_lib(self, file):
-        pe = pefile.PE(file)
-        pe.parse_data_directories()
         imps = []
         try:
+            pe = pefile.PE(file)
+            pe.parse_data_directories()
             for entry in pe.DIRECTORY_ENTRY_IMPORT:
                 for imp in entry.imports:
                     if imp.name == None:
                         continue
                     imps.append(str(imp.name, "latin"))
         except Exception:
-            print("don't have imported libraries")
+            print("not PE file")
         return imps
+
+    def extract_image_file_PE(self, src, dst):
+        cnt = 0
+        for f in listdir(src):
+            if isfile(dst+f):
+                continue
+            file = join(src, f)
+            try:
+                pe = pefile.PE(file)
+                with open(file, 'rb') as ff:
+                    content = ff.read()
+                    if len(content) == 0:
+                        continue
+                    two_first_byte = chr(content[0]) + chr(content[1])
+                    if two_first_byte != "MZ":
+                        continue
+                    pixels = []
+                    h, w = 0, 0
+                    for byte in content:
+                        pixels.append(byte)
+                    sz = len(pixels)
+                    w = self.chooseWith(sz / 1024)
+                    h = int(sz / w)
+                    with open(dst + f + '.json', 'w') as js:
+                        data = {'name': f, 'pixels': pixels[0: h * w], 'width': w, 'height': h}
+                        json.dump(data, js)
+                        js.write('\n')
+                        cnt += 1
+                        print("file's id: %d, name = %s" % (cnt, f))
+            except Exception:
+                print("not PE file")
 
     def extract_image(self, zip_file, out_file):
         cnt = 0
@@ -155,13 +302,18 @@ class Extractor:
                     cnt += 1
                     print("file's id: %d, name = %s" % (cnt, name))
 
+
     def extract_image_virusshare(self, zip_file, out_file):
         cnt = 0
         with zipfile.ZipFile(zip_file) as zip:
             zip.setpassword(b"infected")
             for name in zip.namelist():
+                if isfile(out_file + name + '.json'):
+                    continue
                 file = zip.open(name)
                 content = file.read()
+                if len(content) == 0:
+                    continue
                 two_first_byte = chr(content[0]) + chr(content[1])
                 if two_first_byte != "MZ":
                     continue
@@ -179,6 +331,59 @@ class Extractor:
                     cnt += 1
                     print("file's id: %d, name = %s" % (cnt, name))
 
+
+    def extract_image_PE_zip(self, zip_file, out_file, str):
+        cnt = 0
+        with zipfile.ZipFile(zip_file) as zip:
+            for name in zip.namelist():
+                if name.replace(str, '') == '':
+                    continue
+                file = zip.open(name)
+                content = file.read()
+                two_first_byte = chr(content[0]) + chr(content[1])
+                if two_first_byte != "MZ":
+                    continue
+                pixels = []
+                h, w = 0, 0
+                for byte in content:
+                    pixels.append(byte)
+                sz = len(pixels)
+                w = self.chooseWith(sz / 1024)
+                h = int(sz / w)
+                name_ = name.replace(str, '')
+                with open(out_file + name_ + '.json', 'w') as js:
+                    data = {'name': name_, 'pixels': pixels[0: h * w], 'width': w, 'height': h}
+                    json.dump(data, js)
+                    js.write('\n')
+                    cnt += 1
+                    print("file's id: %d, name = %s" % (cnt, name_))
+
+
+    def read_test_data(self, zip_file, out_file, pwd):
+        cnt = 0
+        with zipfile.ZipFile(zip_file) as zip:
+            zip.setpassword(pwd.encode())
+            for name in zip.namelist():
+                if 'Samples/' in name and '.' not in name:
+                    name_ = name[name.index('Samples/') + 8:]
+                    if name_ != "":
+                        file = zip.open(name)
+                        content = file.read()
+                        pixels = []
+                        h, w = 0, 0
+                        for byte in content:
+                            pixels.append(byte)
+                        sz = len(pixels)
+                        w = self.chooseWith(sz / 1024)
+                        h = int(sz / w)
+                        with open(out_file + name_ + '.json', 'w') as js:
+                            data = {'name': name_, 'pixels': pixels[0: h * w], 'width': w, 'height': h}
+                            json.dump(data, js)
+                            js.write('\n')
+                            cnt += 1
+                            print("file's id: %d, name = %s" % (cnt, name))
+
+
     def extract_image_PE(self, path, dst):
         cnt = 0
         for f in listdir(path):
@@ -194,6 +399,7 @@ class Extractor:
 
         return 0
 
+
     def is_byte(self, s):
         if s == '':
             return True
@@ -202,6 +408,7 @@ class Extractor:
             return True
         else:
             return False
+
 
     def extract_instructions(self, zip_file, out_file):
         cnt = 0
@@ -226,24 +433,26 @@ class Extractor:
                             js.write('\n')
                         print("file's id: %d, name = %s" % (cnt, name))
 
-    def extract_dll(self, zip_file, out_file):
-        cnt = 0
-        with zipfile.ZipFile(zip_file) as zip:
-            for name in zip.namelist():
-                if name.endswith(".asm"):
-                    cnt += 1
-                    with open(out_file + name[:name.index('.')] + '.json', 'w') as js:
-                        file = zip.open(name, 'r')
-                        ins = []
-                        for line in file:
-                            content = [str(x, 'latin') for x in line.split()]
-                            if len(content) == 1 or not content[0].startswith('.idata') or 'extrn' not in content:
-                                continue
-                            dll_name = content[content.index('extrn') + 1].split(':')[0]
-                            ins.append(dll_name)
-                        data = {'dll': ins, 'name': name}
-                        json.dump(data, js)
-                        print("file's id: %d, name = %s" % (cnt, name))
+
+    # def extract_dll(self, zip_file, out_file):
+    #     cnt = 0
+    #     with zipfile.ZipFile(zip_file) as zip:
+    #         for name in zip.namelist():
+    #             if name.endswith(".asm"):
+    #                 cnt += 1
+    #                 with open(out_file + name[:name.index('.')] + '.json', 'w') as js:
+    #                     file = zip.open(name, 'r')
+    #                     ins = []
+    #                     for line in file:
+    #                         content = [str(x, 'latin') for x in line.split()]
+    #                         if len(content) == 1 or not content[0].startswith('.idata') or 'extrn' not in content:
+    #                             continue
+    #                         dll_name = content[content.index('extrn') + 1].split(':')[0]
+    #                         ins.append(dll_name)
+    #                     data = {'dll': ins, 'name': name}
+    #                     json.dump(data, js)
+    #                     print("file's id: %d, name = %s" % (cnt, name))
+
 
     def extract_dll_PE(self, path, dst):
         cnt = 0
@@ -258,6 +467,7 @@ class Extractor:
                     data = {'name': f, 'dll': dll}
                     json.dump(data, js)
                     print("file's id: %d, name = %s" % (cnt, f))
+
 
     def bilinear_interpolation(self, pixels, w, h, w_2, h_2):
         temp = []
@@ -290,6 +500,7 @@ class Extractor:
             y += y_ratio;
         return temp
 
+
     def image_feature(self, path, f, w_2, h_2, n_chanels=3):
         with open(join(path, f), 'r') as js:
             data = [json.loads(line) for line in js]
@@ -309,27 +520,60 @@ class Extractor:
             pixels_rzed = self.resize_image(pixels, w, h, w_2, h_2)
             return pixels_rzed
 
-    def resize_image(self, pixels, w, h, w_2, h_2):
 
+    def resize_image(self, pixels, w, h, w_2, h_2):
         im = np.reshape(np.array(pixels), (h, w)).astype(np.uint8)
         thumbnail = cv.resize(im, (w_2, h_2), interpolation=cv.INTER_AREA)
         return list(np.reshape(thumbnail, (w_2 * h_2,)).astype(float))
 
+
+    def dll_feature(self, file, dic):
+        with open(file, 'r') as js:
+            data = [json.loads(line) for line in js]
+            apis = data[0]['feature']
+            feature = [0]*(len(dic))
+            for api in apis:
+                if api in dic:
+                    id = dic[api]
+                    feature [id] = 1
+            return feature
+
+    def build_dll_feature(self, src, dst, dic):
+        cnt = 0
+        for f in listdir(src):
+            if isfile(dst + f):
+                continue
+            file = join(src, f)
+            fea = self.dll_feature(file, dic)
+            with open(dst + f + '.json', 'w') as js:
+                data = {'name': f, 'feature': fea}
+                json.dump(data, js)
+                js.close()
+                cnt += 1
+                print("file's id: %d, name = %s" % (cnt, f))
+
+
     def build_image_feature(self, path, dst, w_2, h_2):
         cnt = 0
         for f in listdir(path):
-            cnt += 1
-            pixels = self.image_feature(path, f, w_2, h_2)
-            print(pixels)
-            with open(dst + f[:f.index('.')] + '.json', 'w') as js:
-                data = {'name': f[:f.index('.')], 'pixels': pixels, 'width': w_2, 'height': h_2}
-                json.dump(data, js)
-                print("file's id: %d, name = %s" % (cnt, f[:f.index('.')]))
+            try:
+                if isfile(dst + f):
+                    continue
+                cnt += 1
+                pixels = self.image_feature(path, f, w_2, h_2)
+                print(pixels)
+                with open(dst + f[:f.index('.')] + '.json', 'w') as js:
+                    data = {'name': f[:f.index('.')], 'pixels': pixels, 'width': w_2, 'height': h_2}
+                    json.dump(data, js)
+                    print("file's id: %d, name = %s" % (cnt, f[:f.index('.')]))
+            except Exception:
+                print("error")
+
 
     def build_ins_feature(self):
-
         # TO DO
         return 0
+
 
     def read_image_json(self, file):
         with open(file, 'r') as f:
@@ -338,6 +582,7 @@ class Extractor:
             w = data[0]['width']
             h = data[0]['height']
             return pixels, w, h
+
 
     def check_type(self, zip_file):
         # cmd = shlex.split('file --mime-type {0}'.format(filename))
@@ -356,6 +601,12 @@ class Extractor:
                 if b == "MZ":
                     cnt += 1
         print("number of file exe: %d" % (cnt))
+
+
+    def saveImage(self, src, dst):
+        data, width, height, name = self.read_data(src, 100)
+        for (p, w, h, n) in zip(data, width, height, name):
+            self.display(p, w, h, n, dst)
 
 
 ex = Extractor()
@@ -386,4 +637,27 @@ ex = Extractor()
 # ex.extract_dll_PE("D:/Data/Malware/clear/benign/", "D:/Data/Malware/clear/benign/import/")
 # ex.check_type("D:/VirusShare_00309.zip")
 #
-ex.extract_image_virusshare("D:/Data/Malware/clear/benign.zip", "D:/Data/Malware/clear/")
+# ex.read_test_data("D:/Data/Malware/clear/APT_Group.zip", "D:/Data/Malware/clear/benign/import/")
+# print('dangmc'.encode())
+# ex.saveImage("D:/Data/Malware/clear/virus/", "D:/Documents/Image/")
+
+# ex.extract_2d_histogram("D:/Data/Malware/clear/image/", "D:/Data/Malware/clear/histogram/", 1024)
+src = "D:/Data/Malware/clear/VT/files_16/"
+dst = "D:/Data/Malware/clear/VT/image/"
+ex.extract_image_file_PE(src, dst)
+# cnt_t = 0
+# cnt_f = 0
+# for f in listdir(path):
+#     dll = ex.extract_import_lib(join(path, f))
+#     if len(dll) == 0:
+#         cnt_f += 1
+#     else:
+#         cnt_t += 1
+#         print(cnt_t)
+# ex.extract_image_file_PE(src, dst)
+# text_file = open("D:/Data/Malware/clear/VT/api.txt", 'r')
+# lines = text_file.read().split(',')
+# api = {}
+# for i in range(len(lines)):
+#     api[lines[i]] = i
+# ex.build_dll_feature(src, dst, api)

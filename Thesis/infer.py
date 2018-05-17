@@ -33,12 +33,12 @@ import threading
 # This is a placeholder for a Google-internal import.
 
 from grpc.beta import implementations
-import numpy
+import numpy as np
 import tensorflow as tf
 
 from tensorflow_serving.apis import predict_pb2
 from tensorflow_serving.apis import prediction_service_pb2
-import mnist_input_data
+from dataset import read_data
 
 
 tf.app.flags.DEFINE_integer('concurrency', 1,
@@ -118,9 +118,9 @@ def _create_rpc_callback(label, result_counter):
     else:
       sys.stdout.write('.')
       sys.stdout.flush()
-      response = numpy.array(
+      response = np.array(
           result_future.result().outputs['scores'].float_val)
-      prediction = numpy.argmax(response)
+      prediction = np.argmax(response)
       if label != prediction:
         result_counter.inc_error()
       result_counter.add_prediction(prediction)
@@ -144,22 +144,22 @@ def do_inference(hostport, work_dir, concurrency, num_tests):
   Raises:
     IOError: An error occurred processing test data set.
   """
-  test_data_set = mnist_input_data.read_data_sets(work_dir).test
+  images, labels = read_data(work_dir, is_malware=True)
   host, port = hostport.split(':')
   channel = implementations.insecure_channel(host, int(port))
   stub = prediction_service_pb2.beta_create_PredictionService_stub(channel)
   result_counter = _ResultCounter(num_tests, concurrency)
-  for _ in range(num_tests):
+  for (image, label) in zip(images, labels):
     request = predict_pb2.PredictRequest()
-    request.model_spec.name = 'mnist'
+    request.model_spec.name = 'malware'
     request.model_spec.signature_name = 'predict_images'
-    image, label = test_data_set.next_batch(1)
+    image_ = np.reshape(image, (64, 64, 1))
     request.inputs['images'].CopyFrom(
-        tf.contrib.util.make_tensor_proto(image[0], shape=[1, image[0].size]))
+        tf.contrib.util.make_tensor_proto(image_, shape=[1, 64, 64, 1]))
     result_counter.throttle()
     result_future = stub.Predict.future(request, 5.0)  # 5 seconds
     result_future.add_done_callback(
-        _create_rpc_callback(label[0], result_counter))
+        _create_rpc_callback(label, result_counter))
   return (result_counter.get_error_rate(), result_counter.get_predictions())
 
 
@@ -174,7 +174,6 @@ def main(_):
                             FLAGS.concurrency, FLAGS.num_tests)
   print('\nInference error rate: %s%%' % (error_rate * 100))
 
-  print('\nPredictions: ')
 
 
 if __name__ == '__main__':

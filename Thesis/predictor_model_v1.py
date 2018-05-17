@@ -1,6 +1,6 @@
 import numpy as np
 import tensorflow as tf
-from Model_v2 import Resnet_v2
+import Model_v1
 import dataset
 import sklearn as sk
 
@@ -17,17 +17,18 @@ tf.app.flags.DEFINE_string('summaries_dir', '/tmp', "summaries directory")
 tf.app.flags.DEFINE_integer('input_size', 64, "input size")
 tf.app.flags.DEFINE_integer('learning_rate_decay_epoch', 50, 'epoch when decay learning rate')
 
-input_size = [64, 64, 1]
+input_size = 256
 num_labels = 2
 batch_size = 64
 FLAGS = tf.app.flags.FLAGS
 
 tf.reset_default_graph()
 
-dataset = dataset.load_real_data(FLAGS.path_malware, FLAGS.path_benign, one_hot_encode=True, sz=FLAGS.input_size)
+dataset = dataset.load_test_data_histogram(FLAGS.path_malware, FLAGS.path_benign, one_hot_encode=True, sz=FLAGS.input_size, num_labels=2)
 
-model = Resnet_v2(3, [2, 2, 2], num_labels, input_size)
-params = model.build_model(filters_init=32, strides_layers=[2, 2, 2], kernel_size=3, pool_size=3, strides=2)
+
+params = Model_v1.model(input_sz=input_size, output_sz=num_labels, layers=[256, 256, 2])
+
 
 config = tf.ConfigProto()
 config.gpu_options.per_process_gpu_memory_fraction = 0.7
@@ -63,7 +64,7 @@ accuracy = tf.reduce_mean(tf.cast(correct_prediction, 'float'))
 
 ensemble = np.zeros(shape=(dataset.real.labels.shape[0], 2))
 saver = tf.train.Saver()
-n_models = 3
+n_models = 1
 for k in range(n_models):
     model_path = FLAGS.checkpoint_dir + str(k + 1)
     with tf.Session() as sess:
@@ -72,10 +73,9 @@ for k in range(n_models):
                 params['softmax'], feed_dict={
                     params['in']: dataset.real.gram,
                     params['labels']: dataset.real.labels,
-                    params['weight_decay']: 0.005,
-                    params['training']: False
+                    params['weight_decay']: 0.005
                 })
-        print(pred)
+        # print(pred)
         ensemble += pred
         sess.close()
 
@@ -83,6 +83,8 @@ ensemble = ensemble / n_models
 ensemble = np.argmax(ensemble, 1)
 labels = np.argmax(dataset.real.labels, 1)
 
+# print(ensemble)
+# print(labels)
 print("confusion matrix")
 print(sk.metrics.confusion_matrix(labels, ensemble))
 

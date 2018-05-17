@@ -1,8 +1,8 @@
 import csv
-from Model_v2 import Resnet_v2
+from Model_v3 import Resnet_v2
 import tensorflow as tf
 import dataset
-from cross_validation import CrossValidationFolds
+from CrossValidationFolds_mix import CrossValidationFolds
 import sys, os
 
 # momentum: lr = 0.005, decay_step = 20 epoch, decay_rate = 0.5
@@ -10,8 +10,10 @@ import sys, os
 
 tf.app.flags.DEFINE_integer('training_iteration', 40000, 'number of training iterations.')
 tf.app.flags.DEFINE_string('work_dir', '/tmp', 'Working directory.')
-tf.app.flags.DEFINE_string('path_malware', '/tmp', 'Working directory of malware.')
-tf.app.flags.DEFINE_string('path_benign', '/tmp', 'Working directory of benign.')
+tf.app.flags.DEFINE_string('path_malware_his', '/tmp', 'Working directory of malware.')
+tf.app.flags.DEFINE_string('path_benign_his', '/tmp', 'Working directory of benign.')
+tf.app.flags.DEFINE_string('path_malware_img', '/tmp', 'Working directory of malware.')
+tf.app.flags.DEFINE_string('path_benign_img', '/tmp', 'Working directory of benign.')
 tf.app.flags.DEFINE_string('path_real', '/tmp', 'Working directory of real data.')
 tf.app.flags.DEFINE_integer('model_version', 1, 'model version.')
 tf.app.flags.DEFINE_float('learning_rate', 0.001, 'learning rate.')
@@ -89,8 +91,10 @@ print("build model")
 
 # dataset = dataset.mnist(MNIST, one_hot_encode=True)
 
-dataset = dataset.load_data(FLAGS.path_malware, FLAGS.path_benign, FLAGS.path_real, one_hot_encode=True, sz=FLAGS.input_size)
-cross_validation = CrossValidationFolds(dataset.train.get_gram(), dataset.train.get_labels(), FOLDS)
+dataset = dataset.load_histogram_image(path_malware_his=FLAGS.path_malware_his, path_malware_img=FLAGS.path_malware_img,
+                                       path_benign_his=FLAGS.path_benign_his, path_benign_img=FLAGS.path_benign_img, one_hot_encode=True)
+cross_validation = CrossValidationFolds(dataset.train.get_img(), dataset.train.get_his(),
+                                        dataset.train.get_labels(), FOLDS)
 
 input_size = [FLAGS.input_size, FLAGS.input_size, 1]
 num_labels = 2
@@ -139,8 +143,8 @@ merged = tf.summary.merge_all()
 
 # export model
 sess.run(tf.global_variables_initializer())
-builder = export_model(export_path_base=sys.argv[-1], version=str(FLAGS.model_version), input_name=params['in_name'],
-                       input=params['in'], output_score=values, output_softmax=params['softmax'], sess=sess)
+# builder = export_model(export_path_base=sys.argv[-1], version=str(FLAGS.model_version), input_name=params['in_name'],
+#                        input=params['in'], output_score=values, output_softmax=params['softmax'], sess=sess)
 
 # Training model
 saver = tf.train.Saver()
@@ -168,31 +172,34 @@ for k in range(FOLDS):
         iter_per_epoch += 1
         batch = data.train.next_batch(batch_size)
         train_step.run(
-            feed_dict={params['in']: batch[0], params['labels']: batch[1], params['weight_decay']: FLAGS.weight_decay,
-                       params['training']: True})
+            feed_dict={params['in']: batch[0], params['labels']: batch[2],
+                       params['weight_decay']: FLAGS.weight_decay,
+                       params['training']: True, params['in_histogram']: batch[1]})
 
         loss_batch, acc_batch = sess.run(
             [cost_function, accuracy], feed_dict={
                 params['in']: batch[0],
-                params['labels']: batch[1],
+                params['labels']: batch[2],
                 params['weight_decay']: FLAGS.weight_decay,
-                params['training']: False
+                params['training']: False,
+                params['in_histogram']: batch[1]
             })
 
         loss_train += loss_batch
-        acc_train += acc_batch * batch[1].shape[0]
-        ins += batch[1].shape[0]
+        acc_train += acc_batch * batch[0].shape[0]
+        ins += batch[0].shape[0]
 
-        if data.train.is_new_epoch() == True :
+        if data.train.is_new_epoch() == True:
             print('-' * 20)
             print('Folds = %d, iteration = %d, epoch = %d' % (k + 1, iter, data.train.get_epochs_completed()))
 
             summary = sess.run(
                 merged, feed_dict={
                     params['in']: batch[0],
-                    params['labels']: batch[1],
+                    params['labels']: batch[2],
                     params['weight_decay']: FLAGS.weight_decay,
-                    params['training']: False
+                    params['training']: False,
+                    params['in_histogram']: batch[1]
                 })
             print('cost function %g' % (loss_train / iter_per_epoch))
             print("train's accuracy %g" % (acc_train / ins))
@@ -201,8 +208,9 @@ for k in range(FOLDS):
             if data.train.get_epochs_completed() % 5 == 0:
                 acc_valid, summary = sess.run(
                     [accuracy, merged], feed_dict={
-                        params['in']: data.validation.gram,
+                        params['in']: data.validation.img,
                         params['labels']: data.validation.labels,
+                        params['in_histogram']: data.validation.his,
                         params['weight_decay']: FLAGS.weight_decay,
                         params['training']: False
                     })
@@ -211,13 +219,14 @@ for k in range(FOLDS):
                 valid_writer.add_summary(summary, iter)
                 if best_accuracy_fold < acc_valid:
                     best_accuracy_fold = acc_valid
-                    save_path = saver.save(sess, FLAGS.checkpoint_dir + str(k+1)+'/'+'model')
+                    save_path = saver.save(sess, FLAGS.checkpoint_dir + str(k + 1) + '/' + 'model')
                     print("Model saved in path: %s" % save_path)
 
                 acc_test, summary = sess.run(
                     [accuracy, merged], feed_dict={
-                        params['in']: dataset.real.gram,
-                        params['labels']: dataset.real.labels,
+                        params['in']: dataset.test.img,
+                        params['labels']: dataset.test.labels,
+                        params['in_histogram']: dataset.test.his,
                         params['weight_decay']: FLAGS.weight_decay,
                         params['training']: False
                     })
@@ -232,8 +241,6 @@ for k in range(FOLDS):
     cv_accuracy += best_accuracy_fold
     if best_accuracy < best_accuracy_fold:
         best_accuracy = best_accuracy_fold
-        builder.save()
-        print("model updated")
 
 print('Done training!')
 print("accuracy = %g" % (cv_accuracy / FOLDS))
