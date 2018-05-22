@@ -1,0 +1,37 @@
+model histogram
+[[3316  184]
+ [ 149 3351]]
+********************
+model api
+[[3363  137]
+ [ 314 3186]]
+********************
+model all
+[[3378  122]
+ [ 156 3344]]
+********************
+model ensemble
+[[3386  114]
+ [ 149 3351]]
+
+
+
+
+model histogram
+[[  52   35]
+ [ 149 3351]]
+********************
+model api
+[[  64   23]
+ [ 314 3186]]
+********************
+model all
+WARNING:tensorflow:From /home/cuongdm30/Thesis/model_image_his_api/Model_v3.py:156: calling reduce_mean (from tensorflow.python.ops.math_ops) with keep_dims is deprecated and will be removed in a future version.
+Instructions for updating:
+keep_dims is deprecated, use keepdims instead
+[[  64   23]
+ [ 156 3344]]
+********************
+model ensemble
+[[  61   26]
+ [ 149 3351]]
