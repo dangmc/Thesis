@@ -1,0 +1,6 @@
+model_checkpoint_path: "/home/cuongdm30/Thesis/model_histogram/check_point_/5/model"
+all_model_checkpoint_paths: "/home/cuongdm30/Thesis/model_histogram/check_point_/1/model"
+all_model_checkpoint_paths: "/home/cuongdm30/Thesis/model_histogram/check_point_/2/model"
+all_model_checkpoint_paths: "/home/cuongdm30/Thesis/model_histogram/check_point_/3/model"
+all_model_checkpoint_paths: "/home/cuongdm30/Thesis/model_histogram/check_point_/4/model"
+all_model_checkpoint_paths: "/home/cuongdm30/Thesis/model_histogram/check_point_/5/model"
