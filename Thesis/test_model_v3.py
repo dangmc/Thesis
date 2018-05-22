@@ -101,7 +101,7 @@ num_labels = 2
 batch_size = 64
 
 model = Resnet_v2(3, [2, 2, 2], num_labels, input_size)
-params = model.build_model(filters_init=32, strides_layers=[2, 2, 2], kernel_size=3, pool_size=3, strides=2)
+params = model.build_model(filters_init=32, strides_layers=[2, 2, 2], kernel_size=3, pool_size=3, strides=2, his_sz=256)
 
 config = tf.ConfigProto()
 config.gpu_options.per_process_gpu_memory_fraction = 0.7
@@ -147,7 +147,7 @@ sess.run(tf.global_variables_initializer())
 #                        input=params['in'], output_score=values, output_softmax=params['softmax'], sess=sess)
 
 # Training model
-saver = tf.train.Saver()
+saver = tf.train.Saver(max_to_keep=10)
 cv_accuracy = 0
 best_accuracy = 0
 for k in range(FOLDS):

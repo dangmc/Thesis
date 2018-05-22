@@ -110,7 +110,7 @@ class Resnet_v2:
             output = tf.add(tf.multiply(s_cos_t, inv_mask), tf.multiply(cos_mt_temp, mask), name='arcface_loss_output')
         return output, cos_t
 
-    def build_model(self, filters_init, strides_layers, kernel_size, strides, pool_size):
+    def build_model(self, filters_init, strides_layers, kernel_size, strides, pool_size, his_sz):
         # TO DO
         # image
         serialized_tf_image = tf.placeholder(tf.string, name='image')
@@ -127,7 +127,7 @@ class Resnet_v2:
 
         # dll feature
         serialized_tf_histogram = tf.placeholder(tf.string, name='dll')
-        feature_histogram = {'z': tf.FixedLenFeature(shape=[256], dtype=tf.float32), }
+        feature_histogram = {'z': tf.FixedLenFeature(shape=[his_sz], dtype=tf.float32), }
         tf_histogram = tf.parse_example(serialized_tf_histogram, feature_histogram)
         histogram = tf.identity(tf_histogram['z'], name='z')
 
@@ -162,7 +162,10 @@ class Resnet_v2:
 
         # dense layer
         inputs = tf.concat([inputs, histogram], 1)
-        outputs = tf.layers.dense(inputs=inputs, units=self.num_classes)
+
+        hidden = tf.layers.dense(inputs=inputs, units=256)
+        hidden_acc = tf.nn.relu(hidden)
+        outputs = tf.layers.dense(inputs=hidden_acc, units=self.num_classes)
         logits = outputs
 
         softmax = tf.nn.softmax(logits)

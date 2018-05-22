@@ -11,15 +11,18 @@ import Model_v1
 
 tf.app.flags.DEFINE_integer('training_iteration', 50000, 'number of training iterations.')
 tf.app.flags.DEFINE_string('work_dir', '/tmp', 'Working directory.')
-tf.app.flags.DEFINE_string('path_malware', '/tmp', 'Working directory of malware.')
-tf.app.flags.DEFINE_string('path_benign', '/tmp', 'Working directory of benign.')
+tf.app.flags.DEFINE_string('path_malware_his', '/tmp', 'Working directory of malware.')
+tf.app.flags.DEFINE_string('path_benign_his', '/tmp', 'Working directory of benign.')
+tf.app.flags.DEFINE_string('path_malware_dll', '/tmp', 'Working directory of malware.')
+tf.app.flags.DEFINE_string('path_benign_dll', '/tmp', 'Working directory of benign.')
 tf.app.flags.DEFINE_string('path_real', '/tmp', 'Working directory of real data.')
 tf.app.flags.DEFINE_integer('model_version', 1, 'model version.')
 tf.app.flags.DEFINE_float('learning_rate', 0.001, 'learning rate.')
 tf.app.flags.DEFINE_float('weight_decay', 0.005, 'weights decay.')
 tf.app.flags.DEFINE_string('checkpoint_dir', '', "check point directory")
 tf.app.flags.DEFINE_string('summaries_dir', '/tmp', "summaries directory")
-tf.app.flags.DEFINE_integer('input_size', 64, "input size")
+tf.app.flags.DEFINE_integer('input_size_his', 256, "input size")
+tf.app.flags.DEFINE_integer('input_size_dll', 794, "input size")
 tf.app.flags.DEFINE_integer('learning_rate_decay_epoch', 50, 'epoch when decay learning rate')
 tf.app.flags.DEFINE_float('dropout_rate', 0.8, "keep dropout rate")
 
@@ -91,10 +94,11 @@ print("build model")
 
 # dataset = dataset.mnist(MNIST, one_hot_encode=True)
 
-dataset = dataset.load_histogram_data(FLAGS.path_malware, FLAGS.path_benign, one_hot_encode=True, sz=FLAGS.input_size)
+dataset = dataset.load_histogram_dll(path_malware_dll=FLAGS.path_malware_dll, path_malware_his=FLAGS.path_malware_his,
+                                     path_benign_dll=FLAGS.path_benign_dll, path_benign_his=FLAGS.path_benign_his, one_hot_encode=True)
 cross_validation = CrossValidationFolds(dataset.train.get_gram(), dataset.train.get_labels(), FOLDS)
 
-input_size = FLAGS.input_size
+input_size = FLAGS.input_size_his + FLAGS.input_size_dll
 num_labels = 2
 batch_size = 64
 

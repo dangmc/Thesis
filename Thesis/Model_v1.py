@@ -1,6 +1,13 @@
 import tensorflow as tf
 import numpy as np
 
+_BATCH_NORM_DECAY = 0.997
+_BATCH_NORM_EPSILON = 1e-5
+
+def batch_norm(inputs, training):
+    return tf.layers.batch_normalization(inputs, momentum=_BATCH_NORM_DECAY, epsilon=_BATCH_NORM_EPSILON,
+                                         scale=True, fused=True, axis=1, training=training)
+
 def weight_variable(shape):
     initial = tf.truncated_normal(shape = shape, stddev=0.1)
     return tf.Variable(initial)
@@ -25,7 +32,8 @@ def model(input_sz, output_sz, layers):
     x = tf.identity(tf_example['x'], name='x')  # use tf.identity() to assign name
     y_ = tf.placeholder('float', shape=[None, output_sz])
     weight_decay = tf.placeholder(tf.float32)
-    dropout_rate = tf.placeholder(tf.float32)
+    training = tf.placeholder(dtype=tf.bool, name='training')
+
     w = []
     b = []
     for iter in range(len(layers)):
@@ -41,7 +49,7 @@ def model(input_sz, output_sz, layers):
     for iter in range(len(layers) - 1):
         a = tf.add(tf.matmul(a, w[iter]), b[iter])
         z = tf.nn.relu(a)
-        z = tf.nn.dropout(z, keep_prob=dropout_rate)
+        z = batch_norm(z, training)
         a = z
     a = tf.add(tf.matmul(a, w[len(layers)-1]), b[len(layers)-1])
     z = tf.nn.softmax(a)
@@ -58,7 +66,7 @@ def model(input_sz, output_sz, layers):
     params['softmax'] = z
     params['labels'] = y_
     params['l2_weights'] = l2_weight
-    params['dropout_rate'] = dropout_rate
+    params['training'] = training
 
     return params
 

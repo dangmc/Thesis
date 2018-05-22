@@ -85,13 +85,13 @@ def learning_rate_schedule(lr_init, decay_rates, boundary_epochs, n_ins, batch_s
     return tf.train.piecewise_constant(global_steps, boundaries=boundaries, values=vals)
 
 
-# build model ENTROPY HISTOGRAM
+# build model
 print('-' * 20)
 print("build model")
 
 # dataset = dataset.mnist(MNIST, one_hot_encode=True)
 
-dataset = dataset.load_histogram_data(FLAGS.path_malware, FLAGS.path_benign, one_hot_encode=True, sz=FLAGS.input_size)
+dataset = dataset.load_dll_data(FLAGS.path_malware, FLAGS.path_benign, one_hot_encode=True, sz=FLAGS.input_size)
 cross_validation = CrossValidationFolds(dataset.train.get_gram(), dataset.train.get_labels(), FOLDS)
 
 input_size = FLAGS.input_size

@@ -1,27 +1,31 @@
-# import csv
-# from Model_v2 import Resnet_v2
+import csv
+from Model_v3 import Resnet_v2
 import tensorflow as tf
 import dataset
-from cross_validation import CrossValidationFolds
+from CrossValidationFolds_mix import CrossValidationFolds
 import sys, os
-import Model_v1
 
 # momentum: lr = 0.005, decay_step = 20 epoch, decay_rate = 0.5
 # adam: lr = 0.001
 
 tf.app.flags.DEFINE_integer('training_iteration', 50000, 'number of training iterations.')
 tf.app.flags.DEFINE_string('work_dir', '/tmp', 'Working directory.')
-tf.app.flags.DEFINE_string('path_malware', '/tmp', 'Working directory of malware.')
-tf.app.flags.DEFINE_string('path_benign', '/tmp', 'Working directory of benign.')
+tf.app.flags.DEFINE_string('path_malware_his', '/tmp', 'Working directory of malware.')
+tf.app.flags.DEFINE_string('path_benign_his', '/tmp', 'Working directory of benign.')
+tf.app.flags.DEFINE_string('path_malware_api', '/tmp', 'Working directory of malware.')
+tf.app.flags.DEFINE_string('path_benign_api', '/tmp', 'Working directory of benign.')
+tf.app.flags.DEFINE_string('path_malware_img', '/tmp', 'Working directory of malware.')
+tf.app.flags.DEFINE_string('path_benign_img', '/tmp', 'Working directory of benign.')
 tf.app.flags.DEFINE_string('path_real', '/tmp', 'Working directory of real data.')
 tf.app.flags.DEFINE_integer('model_version', 1, 'model version.')
 tf.app.flags.DEFINE_float('learning_rate', 0.001, 'learning rate.')
 tf.app.flags.DEFINE_float('weight_decay', 0.005, 'weights decay.')
 tf.app.flags.DEFINE_string('checkpoint_dir', '', "check point directory")
 tf.app.flags.DEFINE_string('summaries_dir', '/tmp', "summaries directory")
-tf.app.flags.DEFINE_integer('input_size', 64, "input size")
+tf.app.flags.DEFINE_integer('input_size_img', 64, "input size")
+tf.app.flags.DEFINE_integer('input_size_his', 256, "input size")
+tf.app.flags.DEFINE_integer('input_size_api', 794, "input size")
 tf.app.flags.DEFINE_integer('learning_rate_decay_epoch', 50, 'epoch when decay learning rate')
-tf.app.flags.DEFINE_float('dropout_rate', 0.8, "keep dropout rate")
 
 FOLDS = 10
 FLAGS = tf.app.flags.FLAGS
@@ -85,20 +89,24 @@ def learning_rate_schedule(lr_init, decay_rates, boundary_epochs, n_ins, batch_s
     return tf.train.piecewise_constant(global_steps, boundaries=boundaries, values=vals)
 
 
-# build model ENTROPY HISTOGRAM
+# build model
 print('-' * 20)
 print("build model")
 
 # dataset = dataset.mnist(MNIST, one_hot_encode=True)
 
-dataset = dataset.load_histogram_data(FLAGS.path_malware, FLAGS.path_benign, one_hot_encode=True, sz=FLAGS.input_size)
-cross_validation = CrossValidationFolds(dataset.train.get_gram(), dataset.train.get_labels(), FOLDS)
+dataset = dataset.load_histogram_dll_image(path_malware_his=FLAGS.path_malware_his, path_malware_img=FLAGS.path_malware_img,
+                                       path_benign_his=FLAGS.path_benign_his, path_benign_img=FLAGS.path_benign_img, one_hot_encode=True,
+                                           path_malware_dll=FLAGS.path_malware_api, path_benign_dll=FLAGS.path_benign_api)
+cross_validation = CrossValidationFolds(dataset.train.get_img(), dataset.train.get_his(),
+                                        dataset.train.get_labels(), FOLDS)
 
-input_size = FLAGS.input_size
+input_size = [FLAGS.input_size_img, FLAGS.input_size_img, 1]
 num_labels = 2
 batch_size = 64
 
-params = Model_v1.model(input_sz=input_size, output_sz=num_labels, layers=[256, 256, 2])
+model = Resnet_v2(3, [2, 2, 2], num_labels, input_size)
+params = model.build_model(filters_init=32, strides_layers=[2, 2, 2], kernel_size=3, pool_size=3, strides=2, his_sz=FLAGS.input_size_his + FLAGS.input_size_api)
 
 config = tf.ConfigProto()
 config.gpu_options.per_process_gpu_memory_fraction = 0.7
@@ -140,6 +148,9 @@ merged = tf.summary.merge_all()
 
 # export model
 sess.run(tf.global_variables_initializer())
+# builder = export_model(export_path_base=sys.argv[-1], version=str(FLAGS.model_version), input_name=params['in_name'],
+#                        input=params['in'], output_score=values, output_softmax=params['softmax'], sess=sess)
+
 # Training model
 saver = tf.train.Saver(max_to_keep=10)
 cv_accuracy = 0
@@ -166,20 +177,22 @@ for k in range(FOLDS):
         iter_per_epoch += 1
         batch = data.train.next_batch(batch_size)
         train_step.run(
-            feed_dict={params['in']: batch[0], params['labels']: batch[1], params['weight_decay']: FLAGS.weight_decay,
-                       params['training']: True})
+            feed_dict={params['in']: batch[0], params['labels']: batch[2],
+                       params['weight_decay']: FLAGS.weight_decay,
+                       params['training']: True, params['in_histogram']: batch[1]})
 
         loss_batch, acc_batch = sess.run(
             [cost_function, accuracy], feed_dict={
                 params['in']: batch[0],
-                params['labels']: batch[1],
+                params['labels']: batch[2],
                 params['weight_decay']: FLAGS.weight_decay,
-                params['training']: False
+                params['training']: False,
+                params['in_histogram']: batch[1]
             })
 
         loss_train += loss_batch
-        acc_train += acc_batch * batch[1].shape[0]
-        ins += batch[1].shape[0]
+        acc_train += acc_batch * batch[0].shape[0]
+        ins += batch[0].shape[0]
 
         if data.train.is_new_epoch() == True:
             print('-' * 20)
@@ -188,9 +201,10 @@ for k in range(FOLDS):
             summary = sess.run(
                 merged, feed_dict={
                     params['in']: batch[0],
-                    params['labels']: batch[1],
+                    params['labels']: batch[2],
                     params['weight_decay']: FLAGS.weight_decay,
-                    params['training']: False
+                    params['training']: False,
+                    params['in_histogram']: batch[1]
                 })
             print('cost function %g' % (loss_train / iter_per_epoch))
             print("train's accuracy %g" % (acc_train / ins))
@@ -199,8 +213,9 @@ for k in range(FOLDS):
             if data.train.get_epochs_completed() % 5 == 0:
                 acc_valid, summary = sess.run(
                     [accuracy, merged], feed_dict={
-                        params['in']: data.validation.gram,
+                        params['in']: data.validation.img,
                         params['labels']: data.validation.labels,
+                        params['in_histogram']: data.validation.his,
                         params['weight_decay']: FLAGS.weight_decay,
                         params['training']: False
                     })
@@ -214,8 +229,9 @@ for k in range(FOLDS):
 
                 acc_test, summary = sess.run(
                     [accuracy, merged], feed_dict={
-                        params['in']: dataset.test.gram,
+                        params['in']: dataset.test.img,
                         params['labels']: dataset.test.labels,
+                        params['in_histogram']: dataset.test.his,
                         params['weight_decay']: FLAGS.weight_decay,
                         params['training']: False
                     })

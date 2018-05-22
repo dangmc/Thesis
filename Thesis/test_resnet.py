@@ -8,7 +8,7 @@ import sys, os
 # momentum: lr = 0.005, decay_step = 20 epoch, decay_rate = 0.5
 # adam: lr = 0.001
 
-tf.app.flags.DEFINE_integer('training_iteration', 40000, 'number of training iterations.')
+tf.app.flags.DEFINE_integer('training_iteration', 50000, 'number of training iterations.')
 tf.app.flags.DEFINE_string('work_dir', '/tmp', 'Working directory.')
 tf.app.flags.DEFINE_string('path_malware', '/tmp', 'Working directory of malware.')
 tf.app.flags.DEFINE_string('path_benign', '/tmp', 'Working directory of benign.')
