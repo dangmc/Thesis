@@ -1,0 +1,3 @@
+model_checkpoint_path: "/home/cuongdm30/Thesis/model_ngram/checkpoint/2/model"
+all_model_checkpoint_paths: "/home/cuongdm30/Thesis/model_ngram/checkpoint/1/model"
+all_model_checkpoint_paths: "/home/cuongdm30/Thesis/model_ngram/checkpoint/2/model"
