@@ -1,0 +1,44 @@
+#include <iostream>
+#include <map>
+#include <stdio.h>
+
+using namespace std;
+
+int main(){
+  freopen("1007F.txt", "r", stdin);
+  int n;
+  map<string, int> mp;
+  cin >> n;
+  int a[n+1], b[n+1];
+  b[0] = 0;
+  int id = 0;
+  for (int i = 1; i <= n; i++){
+    string tmp;
+    cin >> tmp;
+    if (!mp[tmp]) mp[tmp] = ++id;
+    a[i] = mp[tmp];
+    b[i] = b[i-1] + tmp.length();
+  }
+  int s_len = b[n] + n - 2;
+  cout << "total length = " << s_len << '\n';
+  int ans = 1000000;
+  for (int i = 1; i < n; i++)
+     for (int j = i + 1; j <= n; j++) {
+       int len = b[j] - b[i-1] + j - i;
+       cout << i << " to " << j << ": " << len << '\n';
+       int k = j + 1, p = 0, cnt = 0; 
+       while (k <= n) {
+         cout << a[i + p] << " " << a[k] << '\n';
+         if (a[i + p] == a[k]){ 
+           p++; 
+           cout << p << '\n';
+           if (p == j - i + 1) {cnt ++; p = 0;}
+         }
+         else p =0;
+         k++;
+       }
+      cout << i << " " << j << " " << cnt << '\n';
+      ans = min (ans, s_len - cnt*len + cnt*(j-i+1));
+     } 
+  cout << ans; 
+}  
